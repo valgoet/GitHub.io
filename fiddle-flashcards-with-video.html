@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fiddle Tune Flashcards Pro</title>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // SVG Icons
+    const List = (props) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>);
+    const Search = (props) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>);
+    const X = (props) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>);
+    const LayoutGrid = (props) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>);
+
+    // Helper function to extract YouTube video ID
+    const getYouTubeVideoId = (url) => {
+      // Handle various YouTube URL formats including Shorts
+      const patterns = [
+        /(?:youtube\.com\/watch\?v=|youtu\.be\/)([^#&?\/]{11})/,  // Standard and youtu.be
+        /youtube\.com\/shorts\/([^#&?\/]{11})/,                    // Shorts
+        /youtube\.com\/embed\/([^#&?\/]{11})/,                     // Embed
+        /youtube\.com\/v\/([^#&?\/]{11})/,                         // Old /v/ format
+      ];
+      
+      for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match && match[1]) {
+          return match[1];
+        }
+      }
+      return null;
+    };
+
+    const FiddleFlashcards = () => {
+      const [tunes, setTunes] = useState([]);
+      const [isAdding, setIsAdding] = useState(false);
+      const [newTuneName, setNewTuneName] = useState('');
+      const [uploadedAudio, setUploadedAudio] = useState([]);
+      const [uploadedVideos, setUploadedVideos] = useState([]);
+      const [youtubeLinks, setYoutubeLinks] = useState([]);
+      const [youtubeInput, setYoutubeInput] = useState('');
+      const [youtubeInputExisting, setYoutubeInputExisting] = useState('');
+      const [isRecording, setIsRecording] = useState(false);
+      const [filter, setFilter] = useState('all');
+      const [currentIndex, setCurrentIndex] = useState(0);
+      const [showAudio, setShowAudio] = useState(false);
+      const [showVideos, setShowVideos] = useState(false);
+      const [metronomeActive, setMetronomeActive] = useState(false);
+      const [metronomeBPM, setMetronomeBPM] = useState(120);
+      const [newTuneNotes, setNewTuneNotes] = useState('');
+      const [editingNotes, setEditingNotes] = useState(false);
+      const [tempNotes, setTempNotes] = useState('');
+      const [showPDF, setShowPDF] = useState(false);
+      const [showListView, setShowListView] = useState(false);
+      const [searchQuery, setSearchQuery] = useState('');
+      const [isShuffled, setIsShuffled] = useState(false);
+      const [shuffledIndices, setShuffledIndices] = useState([]);
+      const [sortBy, setSortBy] = useState('lastPracticed');
+      const [sortReverse, setSortReverse] = useState(false);
+      const [hasLoadedData, setHasLoadedData] = useState(false);
+      const [editingClipId, setEditingClipId] = useState(null);
+      const [tempClipName, setTempClipName] = useState('');
+      const [addingAudioToTune, setAddingAudioToTune] = useState(null);
+      const [addingVideoToTune, setAddingVideoToTune] = useState(null);
+      const [isRecordingExisting, setIsRecordingExisting] = useState(false);
+
+      const mediaRecorderRef = useRef(null);
+      const audioChunksRef = useRef([]);
+      const metronomeIntervalRef = useRef(null);
+
+      const categories = ['New', 'Learning', 'Almost There', 'Learned'];
+      const practiceSchedule = {'New': 'Daily', 'Learning': 'Every other day', 'Almost There': 'Weekly', 'Learned': 'Monthly'};
+
+      useEffect(() => {
+        setHasLoadedData(true);
+      }, []);
+
+      // Metronome
+      useEffect(() => {
+        if (metronomeActive) {
+          const interval = 60000 / metronomeBPM;
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          metronomeIntervalRef.current = setInterval(() => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.frequency.value = 1000;
+            gain.gain.value = 0.3;
+            osc.start(ctx.currentTime);
+            osc.stop(ctx.currentTime + 0.05);
+          }, interval);
+        } else if (metronomeIntervalRef.current) {
+          clearInterval(metronomeIntervalRef.current);
+        }
+        return () => {
+          if (metronomeIntervalRef.current) clearInterval(metronomeIntervalRef.current);
+        };
+      }, [metronomeActive, metronomeBPM]);
+
+      const startRecording = async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorderRef.current = new MediaRecorder(stream);
+          audioChunksRef.current = [];
+          mediaRecorderRef.current.ondataavailable = (event) => audioChunksRef.current.push(event.data);
+          mediaRecorderRef.current.onstop = () => {
+            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+            const newClip = {name: `Recording ${uploadedAudio.length + 1}`, url: URL.createObjectURL(audioBlob)};
+            setUploadedAudio([...uploadedAudio, newClip]);
+            stream.getTracks().forEach(track => track.stop());
+          };
+          mediaRecorderRef.current.start();
+          setIsRecording(true);
+        } catch (error) {
+          alert('Could not access microphone: ' + error.message);
+        }
+      };
+
+      const stopRecording = () => {
+        if (mediaRecorderRef.current && isRecording) {
+          mediaRecorderRef.current.stop();
+          setIsRecording(false);
+        }
+      };
+
+      const handleFileUpload = (event) => {
+        const file = event.target.files[0];
+        if (file && file.type.startsWith('audio/')) {
+          const newClip = {name: `Clip ${uploadedAudio.length + 1}`, url: URL.createObjectURL(file)};
+          setUploadedAudio([...uploadedAudio, newClip]);
+        } else {
+          alert('Please upload an audio file');
+        }
+      };
+
+      const handleVideoUpload = (event) => {
+        const file = event.target.files[0];
+        if (file && file.type.startsWith('video/')) {
+          const newVideo = {name: `Video ${uploadedVideos.length + 1}`, url: URL.createObjectURL(file), type: 'upload'};
+          setUploadedVideos([...uploadedVideos, newVideo]);
+        } else {
+          alert('Please upload a video file');
+        }
+      };
+
+      const addYouTubeLink = () => {
+        const videoId = getYouTubeVideoId(youtubeInput);
+        if (videoId) {
+          const newVideo = {
+            name: `YouTube ${youtubeLinks.length + 1}`,
+            videoId: videoId,
+            type: 'youtube'
+          };
+          setYoutubeLinks([...youtubeLinks, newVideo]);
+          setYoutubeInput('');
+        } else {
+          alert('Please enter a valid YouTube URL');
+        }
+      };
+
+      const addYouTubeLinkExisting = (tuneId) => {
+        const videoId = getYouTubeVideoId(youtubeInputExisting);
+        if (videoId) {
+          const newVideo = {
+            name: `YouTube ${(tunes.find(t => t.id === tuneId)?.videos?.length || 0) + 1}`,
+            videoId: videoId,
+            type: 'youtube'
+          };
+          setTunes(tunes.map(t => {
+            if (t.id === tuneId) {
+              return { ...t, videos: [...(t.videos || []), newVideo] };
+            }
+            return t;
+          }));
+          setYoutubeInputExisting('');
+          setAddingVideoToTune(null);
+        } else {
+          alert('Please enter a valid YouTube URL');
+        }
+      };
+
+      const handleVideoUploadExisting = (event, tuneId) => {
+        const file = event.target.files[0];
+        if (file && file.type.startsWith('video/')) {
+          const tune = tunes.find(t => t.id === tuneId);
+          const newVideo = {
+            name: `Video ${(tune.videos?.length || 0) + 1}`,
+            url: URL.createObjectURL(file),
+            type: 'upload'
+          };
+          setTunes(tunes.map(t => {
+            if (t.id === tuneId) {
+              return { ...t, videos: [...(t.videos || []), newVideo] };
+            }
+            return t;
+          }));
+          setAddingVideoToTune(null);
+        } else {
+          alert('Please upload a video file');
+        }
+        event.target.value = '';
+      };
+
+      const deleteVideo = (tuneId, videoIndex) => {
+        setTunes(tunes.map(tune => {
+          if (tune.id === tuneId) {
+            const updatedVideos = (tune.videos || []).filter((_, idx) => idx !== videoIndex);
+            return { ...tune, videos: updatedVideos };
+          }
+          return tune;
+        }));
+      };
+
+      const renameVideo = (tuneId, videoIndex, newName) => {
+        setTunes(tunes.map(tune => {
+          if (tune.id === tuneId) {
+            const updatedVideos = [...(tune.videos || [])];
+            updatedVideos[videoIndex] = { ...updatedVideos[videoIndex], name: newName };
+            return { ...tune, videos: updatedVideos };
+          }
+          return tune;
+        }));
+      };
+
+      const saveTune = () => {
+        if (newTuneName && (uploadedAudio.length > 0 || uploadedVideos.length > 0 || youtubeLinks.length > 0)) {
+          const newTune = {
+            id: Date.now(),
+            name: newTuneName,
+            audioClips: uploadedAudio,
+            videos: [...uploadedVideos, ...youtubeLinks],
+            category: 'New',
+            addedDate: new Date().toISOString(),
+            notes: newTuneNotes,
+            practiceHistory: [],
+            pdf: null
+          };
+          const updatedTunes = [...tunes, newTune];
+          setTunes(updatedTunes);
+          setNewTuneName('');
+          setUploadedAudio([]);
+          setUploadedVideos([]);
+          setYoutubeLinks([]);
+          setYoutubeInput('');
+          setNewTuneNotes('');
+          setIsAdding(false);
+          
+          setFilter('all');
+          setSortBy('lastPracticed');
+          setSortReverse(false);
+          setIsShuffled(false);
+          setShuffledIndices([]);
+          setSearchQuery('');
+          setCurrentIndex(updatedTunes.length - 1);
+        }
+      };
+
+      const updateCategory = (id, newCategory) => {
+        setTunes(tunes.map(tune => {
+          if (tune.id === id) {
+            return {
+              ...tune,
+              category: newCategory,
+              practiceHistory: [...(tune.practiceHistory || []), new Date().toISOString()]
+            };
+          }
+          return tune;
+        }));
+      };
+
+      const markAsPracticed = (id) => {
+        setTunes(tunes.map(tune => {
+          if (tune.id === id) {
+            return {
+              ...tune,
+              practiceHistory: [...(tune.practiceHistory || []), new Date().toISOString()]
+            };
+          }
+          return tune;
+        }));
+      };
+
+      const renameAudioClip = (tuneId, clipIndex, newName) => {
+        const updatedTunes = tunes.map(tune => {
+          if (tune.id === tuneId) {
+            const updatedClips = [...tune.audioClips];
+            updatedClips[clipIndex] = { ...updatedClips[clipIndex], name: newName };
+            return { ...tune, audioClips: updatedClips };
+          }
+          return tune;
+        });
+        setTunes(updatedTunes);
+        setEditingClipId(null);
+        setTempClipName('');
+      };
+
+      const startRecordingExisting = async (tuneId) => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorderRef.current = new MediaRecorder(stream);
+          audioChunksRef.current = [];
+          mediaRecorderRef.current.ondataavailable = (event) => audioChunksRef.current.push(event.data);
+          mediaRecorderRef.current.onstop = () => {
+            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+            const tune = tunes.find(t => t.id === tuneId);
+            const newClip = {
+              name: `Recording ${tune.audioClips.length + 1}`, 
+              url: URL.createObjectURL(audioBlob)
+            };
+            setTunes(tunes.map(t => {
+              if (t.id === tuneId) {
+                return { ...t, audioClips: [...t.audioClips, newClip] };
+              }
+              return t;
+            }));
+            stream.getTracks().forEach(track => track.stop());
+            setIsRecordingExisting(false);
+            setAddingAudioToTune(null);
+          };
+          mediaRecorderRef.current.start();
+          setIsRecordingExisting(true);
+        } catch (error) {
+          alert('Could not access microphone: ' + error.message);
+        }
+      };
+
+      const stopRecordingExisting = () => {
+        if (mediaRecorderRef.current && isRecordingExisting) {
+          mediaRecorderRef.current.stop();
+          setIsRecordingExisting(false);
+        }
+      };
+
+      const handleFileUploadExisting = (event, tuneId) => {
+        const file = event.target.files[0];
+        if (file && file.type.startsWith('audio/')) {
+          const tune = tunes.find(t => t.id === tuneId);
+          const newClip = {
+            name: `Clip ${tune.audioClips.length + 1}`, 
+            url: URL.createObjectURL(file)
+          };
+          setTunes(tunes.map(t => {
+            if (t.id === tuneId) {
+              return { ...t, audioClips: [...t.audioClips, newClip] };
+            }
+            return t;
+          }));
+          setAddingAudioToTune(null);
+        } else {
+          alert('Please upload an audio file');
+        }
+        event.target.value = '';
+      };
+
+      const deleteAudioClip = (tuneId, clipIndex) => {
+        setTunes(tunes.map(tune => {
+          if (tune.id === tuneId) {
+            const updatedClips = tune.audioClips.filter((_, idx) => idx !== clipIndex);
+            return { ...tune, audioClips: updatedClips };
+          }
+          return tune;
+        }));
+      };
+
+      const updateTuneNotes = (id, notes) => {
+        setTunes(tunes.map(tune => tune.id === id ? { ...tune, notes } : tune));
+        setEditingNotes(false);
+      };
+
+      const deleteTune = (id) => {
+        setTunes(tunes.filter(tune => tune.id !== id));
+        if (currentIndex >= tunes.length - 1) setCurrentIndex(Math.max(0, tunes.length - 2));
+      };
+
+      const goToTune = (tuneId) => {
+        const index = displayedTunes.findIndex(t => t.id === tuneId);
+        if (index !== -1) {
+          setCurrentIndex(index);
+          setShowListView(false);
+          setShowAudio(false);
+          setShowVideos(false);
+          setShowPDF(false);
+        }
+      };
+
+      const exportTunes = async () => {
+        if (tunes.length === 0) { alert('No tunes to export!'); return; }
+        try {
+          const tunesWithBase64 = await Promise.all(tunes.map(async (tune) => {
+            const audioClipsWithBase64 = await Promise.all(tune.audioClips.map(async (clip) => {
+              const response = await fetch(clip.url);
+              const blob = await response.blob();
+              const base64 = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.readAsDataURL(blob);
+              });
+              return { name: clip.name, url: base64 };
+            }));
+            
+            const videosWithBase64 = await Promise.all((tune.videos || []).map(async (video) => {
+              if (video.type === 'youtube') {
+                return video;
+              } else {
+                const response = await fetch(video.url);
+                const blob = await response.blob();
+                const base64 = await new Promise((resolve) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => resolve(reader.result);
+                  reader.readAsDataURL(blob);
+                });
+                return { name: video.name, url: base64, type: 'upload' };
+              }
+            }));
+            
+            return { ...tune, audioClips: audioClipsWithBase64, videos: videosWithBase64 };
+          }));
+          const dataStr = JSON.stringify({tunes: tunesWithBase64}, null, 2);
+          const dataBlob = new Blob([dataStr], { type: 'application/json' });
+          const url = URL.createObjectURL(dataBlob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `fiddle-tunes-${new Date().toISOString().split('T')[0]}.json`;
+          link.click();
+          URL.revokeObjectURL(url);
+        } catch (error) {
+          alert('Error exporting tunes: ' + error.message);
+        }
+      };
+
+      const importTunes = (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const imported = JSON.parse(e.target.result);
+            
+            if (imported.tunes && Array.isArray(imported.tunes)) {
+              setTunes(imported.tunes);
+              setFilter('all');
+              setCurrentIndex(0);
+              setShowAudio(false);
+              setShowVideos(false);
+              setShowListView(false);
+              setSearchQuery('');
+              setSortBy('lastPracticed');
+              setSortReverse(false);
+              setIsShuffled(false);
+              setShuffledIndices([]);
+              alert(`Successfully imported ${imported.tunes.length} tune(s)!`);
+            }
+            else if (Array.isArray(imported)) {
+              const convertedTunes = imported.map(tune => ({
+                ...tune,
+                audioClips: tune.audioClips || (tune.audio ? [{name: 'Main', url: tune.audio}] : []),
+                videos: tune.videos || [],
+                notes: tune.notes || '',
+                practiceHistory: tune.practiceHistory || []
+              }));
+              setTunes(convertedTunes);
+              setFilter('all');
+              setCurrentIndex(0);
+              setShowAudio(false);
+              setShowVideos(false);
+              setShowListView(false);
+              setSearchQuery('');
+              setSortBy('lastPracticed');
+              setSortReverse(false);
+              setIsShuffled(false);
+              setShuffledIndices([]);
+              alert(`Successfully imported ${convertedTunes.length} tune(s)!`);
+            }
+            else {
+              throw new Error('Invalid file format');
+            }
+          } catch (error) {
+            alert('Error importing file: ' + error.message);
+          }
+        };
+        reader.readAsText(file);
+      };
+
+      const filteredTunes = filter === 'all' ? tunes : tunes.filter(tune => tune.category === filter);
+      const searchedTunes = searchQuery ? filteredTunes.filter(tune => tune.name.toLowerCase().includes(searchQuery.toLowerCase())) : filteredTunes;
+      
+      let sortedTunes = [...searchedTunes];
+      if (sortBy === 'lastPracticed') {
+        sortedTunes.sort((a, b) => {
+          const aDate = a.practiceHistory && a.practiceHistory.length > 0 
+            ? new Date(a.practiceHistory[a.practiceHistory.length - 1]).getTime()
+            : 0;
+          const bDate = b.practiceHistory && b.practiceHistory.length > 0 
+            ? new Date(b.practiceHistory[b.practiceHistory.length - 1]).getTime()
+            : 0;
+          const result = aDate - bDate;
+          return sortReverse ? -result : result;
+        });
+      } else if (sortBy === 'name') {
+        sortedTunes.sort((a, b) => {
+          const result = a.name.localeCompare(b.name);
+          return sortReverse ? -result : result;
+        });
+      } else if (sortBy === 'dateAdded') {
+        sortedTunes.sort((a, b) => {
+          const aDate = new Date(a.addedDate).getTime();
+          const bDate = new Date(b.addedDate).getTime();
+          const result = aDate - bDate;
+          return sortReverse ? -result : result;
+        });
+      }
+      if (sortBy === 'default' && sortReverse) {
+        sortedTunes.reverse();
+      }
+      
+      const displayedTunes = isShuffled && shuffledIndices.length === sortedTunes.length
+        ? shuffledIndices.map(i => sortedTunes[i])
+        : sortedTunes;
+      
+      const currentTune = displayedTunes[currentIndex];
+      
+      const shuffleTunes = () => {
+        const indices = Array.from({ length: sortedTunes.length }, (_, i) => i);
+        for (let i = indices.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [indices[i], indices[j]] = [indices[j], indices[i]];
+        }
+        setShuffledIndices(indices);
+        setIsShuffled(true);
+        setCurrentIndex(0);
+        setShowAudio(false);
+        setShowVideos(false);
+        setShowPDF(false);
+      };
+
+      const unshuffleTunes = () => {
+        setIsShuffled(false);
+        setShuffledIndices([]);
+        setCurrentIndex(0);
+        setShowAudio(false);
+        setShowVideos(false);
+        setShowPDF(false);
+      };
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-100 p-4 md:p-8">
+          <div className="max-w-4xl mx-auto">
+            <div className="text-center mb-8">
+              <h1 className="text-4xl font-bold text-amber-900 mb-2">🎻 Fiddle Tune Flashcards Pro</h1>
+              <p className="text-amber-700">Master your repertoire with spaced repetition</p>
+              
+              {tunes.length > 0 && (
+                <div className="bg-yellow-50 border-2 border-yellow-400 rounded-lg p-3 mt-4 max-w-2xl mx-auto">
+                  <p className="text-yellow-800 text-sm font-semibold">
+                    ⚠️ Remember to Export regularly! Your tunes are not automatically saved.
+                  </p>
+                </div>
+              )}
+              
+              <div className="flex gap-2 justify-center mt-4 flex-wrap">
+                {tunes.length > 0 && (
+                  <>
+                    <button onClick={() => setMetronomeActive(!metronomeActive)} className={`${metronomeActive ? 'bg-red-700' : 'bg-red-600'} hover:bg-red-700 text-white px-4 py-2 rounded-lg font-semibold text-sm`}>
+                      🎵 {metronomeActive ? 'Stop' : 'Metronome'}
+                    </button>
+                    {metronomeActive && (
+                      <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-lg">
+                        <button onClick={() => setMetronomeBPM(Math.max(40, metronomeBPM - 5))} className="text-gray-600 hover:text-gray-900 font-bold">-</button>
+                        <span className="font-semibold text-sm">{metronomeBPM} BPM</span>
+                        <button onClick={() => setMetronomeBPM(Math.min(240, metronomeBPM + 5))} className="text-gray-600 hover:text-gray-900 font-bold">+</button>
+                      </div>
+                    )}
+                    <button onClick={exportTunes} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">📥 Export</button>
+                  </>
+                )}
+                <label className="cursor-pointer">
+                  <span className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm inline-block">📤 Import</span>
+                  <input type="file" accept=".json" onChange={importTunes} className="hidden" />
+                </label>
+              </div>
+            </div>
+
+            {!isAdding && tunes.length === 0 && (
+              <div className="bg-white rounded-lg shadow-lg p-12 text-center">
+                <h2 className="text-2xl font-semibold text-gray-800 mb-4">No tunes yet!</h2>
+                <p className="text-gray-600 mb-6">Start building your collection</p>
+                <button onClick={() => setIsAdding(true)} className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-3 rounded-lg font-semibold">
+                  ➕ Add Your First Tune
+                </button>
+              </div>
+            )}
+
+            {isAdding && (
+              <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                <h2 className="text-2xl font-semibold mb-4 text-gray-800">Add New Tune</h2>
+                <input type="text" placeholder="Tune name..." value={newTuneName} onChange={(e) => setNewTuneName(e.target.value)} className="w-full p-3 border border-gray-300 rounded-lg mb-4" />
+                
+                <div className="mb-4">
+                  <p className="text-sm text-gray-600 mb-2">Add audio recordings:</p>
+                  {uploadedAudio.map((clip, idx) => (
+                    <div key={idx} className="bg-green-50 border border-green-200 rounded-lg p-3 mb-2">
+                      <div className="flex justify-between items-center mb-2">
+                        {editingClipId === `new-${idx}` ? (
+                          <div className="flex gap-2 flex-1">
+                            <input 
+                              type="text" 
+                              value={tempClipName} 
+                              onChange={(e) => setTempClipName(e.target.value)}
+                              className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm"
+                              autoFocus
+                            />
+                            <button 
+                              onClick={() => {
+                                const updatedClips = [...uploadedAudio];
+                                updatedClips[idx] = { ...updatedClips[idx], name: tempClipName };
+                                setUploadedAudio(updatedClips);
+                                setEditingClipId(null);
+                                setTempClipName('');
+                              }}
+                              className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm font-semibold"
+                            >
+                              ✓
+                            </button>
+                            <button 
+                              onClick={() => { setEditingClipId(null); setTempClipName(''); }}
+                              className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-3 py-1 rounded text-sm font-semibold"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <span className="font-semibold text-green-700">{clip.name}</span>
+                            <div className="flex gap-2">
+                              <button 
+                                onClick={() => { 
+                                  setEditingClipId(`new-${idx}`); 
+                                  setTempClipName(clip.name); 
+                                }}
+                                className="text-amber-600 hover:text-amber-700 text-sm font-semibold"
+                              >
+                                Rename
+                              </button>
+                              <button onClick={() => setUploadedAudio(uploadedAudio.filter((_, i) => i !== idx))} className="text-red-600 hover:text-red-700">🗑️</button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      <audio src={clip.url} controls className="w-full" />
+                    </div>
+                  ))}
+                  
+                  {!isRecording && (
+                    <div className="flex gap-2">
+                      <button onClick={startRecording} className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">🎤 Record</button>
+                      <label className="flex-1 cursor-pointer">
+                        <span className="block bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg font-semibold text-sm text-center">📁 Upload Audio</span>
+                        <input type="file" accept="audio/*" onChange={handleFileUpload} className="hidden" />
+                      </label>
+                    </div>
+                  )}
+                  
+                  {isRecording && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+                      <div className="flex items-center justify-center gap-3 mb-3">
+                        <div className="w-3 h-3 bg-red-600 rounded-full animate-pulse"></div>
+                        <span className="text-red-600 font-semibold">Recording...</span>
+                      </div>
+                      <button onClick={stopRecording} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg font-semibold">Stop Recording</button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mb-4">
+                  <p className="text-sm text-gray-600 mb-2">Add videos:</p>
+                  {[...uploadedVideos, ...youtubeLinks].map((video, idx) => (
+                    <div key={idx} className="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-2">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="font-semibold text-purple-700">
+                          {video.type === 'youtube' ? '🎥 ' : '📹 '}{video.name}
+                        </span>
+                        <button 
+                          onClick={() => {
+                            if (video.type === 'youtube') {
+                              setYoutubeLinks(youtubeLinks.filter((_, i) => i !== (idx - uploadedVideos.length)));
+                            } else {
+                              setUploadedVideos(uploadedVideos.filter((_, i) => i !== idx));
+                            }
+                          }} 
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                      {video.type === 'youtube' ? (
+                        <div className="bg-black aspect-video rounded">
+                          <iframe
+                            src={`https://www.youtube.com/embed/${video.videoId}`}
+                            className="w-full h-full rounded"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                          />
+                        </div>
+                      ) : (
+                        <video src={video.url} controls className="w-full rounded" />
+                      )}
+                    </div>
+                  ))}
+                  
+                  <div className="space-y-2">
+                    <label className="cursor-pointer block">
+                      <span className="block bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-semibold text-sm text-center">📹 Upload Video File</span>
+                      <input type="file" accept="video/*" onChange={handleVideoUpload} className="hidden" />
+                    </label>
+                    
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Or paste YouTube URL..."
+                        value={youtubeInput}
+                        onChange={(e) => setYoutubeInput(e.target.value)}
+                        className="flex-1 p-2 border border-gray-300 rounded-lg text-sm"
+                      />
+                      <button
+                        onClick={addYouTubeLink}
+                        disabled={!youtubeInput}
+                        className="bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white px-4 py-2 rounded-lg font-semibold text-sm"
+                      >
+                        Add YouTube
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mb-4">
+                  <p className="text-sm text-gray-600 mb-2">Notes:</p>
+                  <textarea value={newTuneNotes} onChange={(e) => setNewTuneNotes(e.target.value)} placeholder="Add personal notes, tips, key signature, etc." className="w-full p-3 border border-gray-300 rounded-lg" rows="3" />
+                </div>
+
+                <div className="flex gap-3">
+                  <button onClick={saveTune} disabled={!newTuneName || (uploadedAudio.length === 0 && uploadedVideos.length === 0 && youtubeLinks.length === 0)} className="bg-amber-600 hover:bg-amber-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg font-semibold">Save Tune</button>
+                  <button onClick={() => { setIsAdding(false); setNewTuneName(''); setUploadedAudio([]); setUploadedVideos([]); setYoutubeLinks([]); setYoutubeInput(''); setNewTuneNotes(''); }} className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-2 rounded-lg font-semibold">Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {tunes.length > 0 && (
+              <>
+                <div className="mb-6 flex gap-2 flex-wrap justify-between">
+                  <div className="flex gap-2 flex-wrap">
+                    <button onClick={() => { setFilter('all'); setCurrentIndex(0); setIsShuffled(false); setShuffledIndices([]); setSortBy('lastPracticed'); setSortReverse(false); }} className={`px-4 py-2 rounded-lg font-semibold text-sm ${filter === 'all' ? 'bg-amber-600 text-white' : 'bg-white text-gray-700'}`}>All ({tunes.length})</button>
+                    {categories.map(cat => (
+                      <button key={cat} onClick={() => { setFilter(cat); setCurrentIndex(0); setIsShuffled(false); setShuffledIndices([]); setSortBy('lastPracticed'); setSortReverse(false); }} className={`px-4 py-2 rounded-lg font-semibold text-sm ${filter === cat ? 'bg-amber-600 text-white' : 'bg-white text-gray-700'}`}>{cat} ({tunes.filter(t => t.category === cat).length})</button>
+                    ))}
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    <select 
+                      value={sortBy} 
+                      onChange={(e) => { 
+                        setSortBy(e.target.value); 
+                        setCurrentIndex(0); 
+                        setIsShuffled(false); 
+                        setShuffledIndices([]); 
+                      }}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm cursor-pointer"
+                    >
+                      <option value="lastPracticed">Sort: Needs Practice</option>
+                      <option value="dateAdded">Sort: Date Added</option>
+                      <option value="name">Sort: A-Z</option>
+                      <option value="default">Sort: Default</option>
+                    </select>
+                    <button 
+                      onClick={() => {
+                        setSortReverse(!sortReverse);
+                        setCurrentIndex(0);
+                      }}
+                      className="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm"
+                      title="Reverse sort order"
+                    >
+                      {sortReverse ? '↓' : '↑'}
+                    </button>
+                    <button 
+                      onClick={isShuffled ? unshuffleTunes : shuffleTunes} 
+                      className={`${isShuffled ? 'bg-purple-700' : 'bg-purple-600'} hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-semibold text-sm`}
+                    >
+                      🔀 {isShuffled ? 'Unshuffle' : 'Shuffle'}
+                    </button>
+                    <button onClick={() => setShowListView(!showListView)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+                      {showListView ? <><LayoutGrid className="w-4 h-4" />Card View</> : <><List className="w-4 h-4" />List View</>}
+                    </button>
+                    {!isAdding && (
+                      <button onClick={() => setIsAdding(true)} className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">
+                        ➕ Add Tune
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mb-6 relative">
+                  <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
+                  <input type="text" placeholder="Search tunes..." value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setCurrentIndex(0); setIsShuffled(false); setShuffledIndices([]); setSortBy('lastPracticed'); setSortReverse(false); }} className="w-full pl-10 pr-10 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                  {searchQuery && <button onClick={() => { setSearchQuery(''); setCurrentIndex(0); setSortBy('lastPracticed'); setSortReverse(false); }} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>}
+                </div>
+
+                {showListView && displayedTunes.length > 0 && (
+                  <div className="bg-white rounded-lg shadow-lg overflow-hidden mb-6">
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-amber-100">
+                          <tr>
+                            <th className="px-6 py-3 text-left text-sm font-semibold text-amber-900">Tune Name</th>
+                            <th className="px-6 py-3 text-left text-sm font-semibold text-amber-900">Category</th>
+                            <th className="px-6 py-3 text-left text-sm font-semibold text-amber-900">Practice</th>
+                            <th className="px-6 py-3 text-left text-sm font-semibold text-amber-900">Last Practiced</th>
+                            <th className="px-6 py-3 text-left text-sm font-semibold text-amber-900">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {displayedTunes.map((tune, idx) => (
+                            <tr key={tune.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-amber-50'}>
+                              <td className="px-6 py-4 text-gray-900 font-medium">{tune.name}</td>
+                              <td className="px-6 py-4"><span className="inline-block bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-sm font-semibold">{tune.category}</span></td>
+                              <td className="px-6 py-4 text-gray-600 text-sm">{practiceSchedule[tune.category]}</td>
+                              <td className="px-6 py-4 text-gray-600 text-sm">
+                                {tune.practiceHistory && tune.practiceHistory.length > 0 
+                                  ? new Date(tune.practiceHistory[tune.practiceHistory.length - 1]).toLocaleDateString()
+                                  : 'Never'}
+                              </td>
+                              <td className="px-6 py-4"><button onClick={() => goToTune(tune.id)} className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">Practice</button></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {!showListView && displayedTunes.length > 0 && currentTune && (
+                  <div className="bg-white rounded-lg shadow-lg p-6 md:p-8">
+                    <div className="flex justify-between items-start mb-6">
+                      <div>
+                        <span className="inline-block bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-sm font-semibold mb-2">{currentTune.category} - {practiceSchedule[currentTune.category]}</span>
+                        {currentTune.practiceHistory && currentTune.practiceHistory.length > 0 && (
+                          <p className="text-xs text-gray-500 mt-1">Last practiced: {new Date(currentTune.practiceHistory[currentTune.practiceHistory.length - 1]).toLocaleDateString()}</p>
+                        )}
+                      </div>
+                      <button onClick={() => deleteTune(currentTune.id)} className="text-red-600 hover:text-red-700 text-2xl">🗑️</button>
+                    </div>
+                    
+                    <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-lg p-8 mb-6">
+                      <h3 className="text-3xl font-bold text-center text-amber-900 mb-4">{currentTune.name}</h3>
+                      
+                      <div className="space-y-3">
+                        {currentTune.audioClips && currentTune.audioClips.length > 1 && (
+                          <div className="flex gap-2 justify-center flex-wrap mb-2">
+                            {currentTune.audioClips.map((clip, idx) => (
+                              <span key={idx} className="bg-white text-amber-800 border border-amber-200 px-3 py-1 rounded-lg text-sm font-semibold">
+                                🎵 {clip.name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        
+                        {currentTune.videos && currentTune.videos.length > 0 && (
+                          <div className="flex gap-2 justify-center flex-wrap mb-2">
+                            {currentTune.videos.map((video, idx) => (
+                              <span key={idx} className="bg-white text-purple-800 border border-purple-200 px-3 py-1 rounded-lg text-sm font-semibold">
+                                {video.type === 'youtube' ? '🎥' : '📹'} {video.name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        
+                        {currentTune.audioClips && currentTune.audioClips.length > 0 ? (
+                          showAudio ? (
+                            <div className="bg-white rounded-lg p-4 mb-4">
+                              {currentTune.audioClips.map((clip, idx) => (
+                                <div key={idx} className="mb-3 border-b border-gray-200 pb-3 last:border-b-0">
+                                  <div className="flex justify-between items-center mb-2">
+                                    {editingClipId === `${currentTune.id}-${idx}` ? (
+                                      <div className="flex gap-2 flex-1">
+                                        <input 
+                                          type="text" 
+                                          value={tempClipName} 
+                                          onChange={(e) => setTempClipName(e.target.value)}
+                                          className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm"
+                                          autoFocus
+                                        />
+                                        <button 
+                                          onClick={() => renameAudioClip(currentTune.id, idx, tempClipName)}
+                                          className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm font-semibold"
+                                        >
+                                          ✓
+                                        </button>
+                                        <button 
+                                          onClick={() => { setEditingClipId(null); setTempClipName(''); }}
+                                          className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-3 py-1 rounded text-sm font-semibold"
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <p className="text-sm font-semibold text-gray-700">🎵 {clip.name}</p>
+                                        <div className="flex gap-2">
+                                          <button 
+                                            onClick={() => { 
+                                              setEditingClipId(`${currentTune.id}-${idx}`); 
+                                              setTempClipName(clip.name); 
+                                            }}
+                                            className="text-amber-600 hover:text-amber-700 text-sm font-semibold"
+                                          >
+                                            Rename
+                                          </button>
+                                          <button 
+                                            onClick={() => deleteAudioClip(currentTune.id, idx)}
+                                            className="text-red-600 hover:text-red-700 text-sm font-semibold"
+                                          >
+                                            Delete
+                                          </button>
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                  <audio src={clip.url} controls className="w-full" />
+                                </div>
+                              ))}
+                              
+                              {addingAudioToTune === currentTune.id && !isRecordingExisting && (
+                                <div className="mt-3 pt-3 border-t border-gray-200">
+                                  <p className="text-sm text-gray-600 mb-2">Add another recording:</p>
+                                  <div className="flex gap-2">
+                                    <button 
+                                      onClick={() => startRecordingExisting(currentTune.id)} 
+                                      className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-semibold text-sm"
+                                    >
+                                      🎤 Record
+                                    </button>
+                                    <label className="flex-1 cursor-pointer">
+                                      <span className="block bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg font-semibold text-sm text-center">📁 Upload</span>
+                                      <input 
+                                        type="file" 
+                                        accept="audio/*" 
+                                        onChange={(e) => handleFileUploadExisting(e, currentTune.id)} 
+                                        className="hidden" 
+                                      />
+                                    </label>
+                                    <button 
+                                      onClick={() => setAddingAudioToTune(null)}
+                                      className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-lg font-semibold text-sm"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {isRecordingExisting && addingAudioToTune === currentTune.id && (
+                                <div className="mt-3 pt-3 border-t border-gray-200">
+                                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+                                    <div className="flex items-center justify-center gap-3 mb-3">
+                                      <div className="w-3 h-3 bg-red-600 rounded-full animate-pulse"></div>
+                                      <span className="text-red-600 font-semibold">Recording...</span>
+                                    </div>
+                                    <button 
+                                      onClick={stopRecordingExisting} 
+                                      className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg font-semibold"
+                                    >
+                                      Stop Recording
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {!addingAudioToTune && (
+                                <button 
+                                  onClick={() => setAddingAudioToTune(currentTune.id)} 
+                                  className="w-full mt-3 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-semibold text-sm"
+                                >
+                                  ➕ Add Another Recording
+                                </button>
+                              )}
+                              
+                              <button onClick={() => setShowAudio(false)} className="w-full mt-3 bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-lg font-semibold text-sm">Hide Audio</button>
+                            </div>
+                          ) : (
+                            <div className="text-center cursor-pointer mb-4" onClick={() => setShowAudio(true)}>
+                              <div className="text-6xl mb-2">🎵</div>
+                              <p className="text-amber-700">Click to play audio ({currentTune.audioClips.length})</p>
+                            </div>
+                          )
+                        ) : (
+                          <div className="bg-white rounded-lg p-6 text-center mb-4">
+                            <p className="text-gray-600 mb-4">No audio recordings yet</p>
+                            {addingAudioToTune === currentTune.id && !isRecordingExisting ? (
+                              <div>
+                                <p className="text-sm text-gray-600 mb-2">Add a recording:</p>
+                                <div className="flex gap-2 justify-center">
+                                  <button 
+                                    onClick={() => startRecordingExisting(currentTune.id)} 
+                                    className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-semibold text-sm"
+                                  >
+                                    🎤 Record
+                                  </button>
+                                  <label className="cursor-pointer">
+                                    <span className="block bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">📁 Upload</span>
+                                    <input 
+                                      type="file" 
+                                      accept="audio/*" 
+                                      onChange={(e) => handleFileUploadExisting(e, currentTune.id)} 
+                                      className="hidden" 
+                                    />
+                                  </label>
+                                  <button 
+                                    onClick={() => setAddingAudioToTune(null)}
+                                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-lg font-semibold text-sm"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : isRecordingExisting && addingAudioToTune === currentTune.id ? (
+                              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                                <div className="flex items-center justify-center gap-3 mb-3">
+                                  <div className="w-3 h-3 bg-red-600 rounded-full animate-pulse"></div>
+                                  <span className="text-red-600 font-semibold">Recording...</span>
+                                </div>
+                                <button 
+                                  onClick={stopRecordingExisting} 
+                                  className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg font-semibold"
+                                >
+                                  Stop Recording
+                                </button>
+                              </div>
+                            ) : (
+                              <button 
+                                onClick={() => setAddingAudioToTune(currentTune.id)} 
+                                className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-semibold"
+                              >
+                                ➕ Add Recording
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Videos Section */}
+                        {currentTune.videos && currentTune.videos.length > 0 ? (
+                          showVideos ? (
+                            <div className="bg-white rounded-lg p-4">
+                              {currentTune.videos.map((video, idx) => (
+                                <div key={idx} className="mb-4 pb-4 border-b border-gray-200 last:border-b-0">
+                                  <div className="flex justify-between items-center mb-2">
+                                    <p className="text-sm font-semibold text-gray-700">
+                                      {video.type === 'youtube' ? '🎥' : '📹'} {video.name}
+                                    </p>
+                                    <div className="flex gap-2">
+                                      <button 
+                                        onClick={() => {
+                                          const newName = prompt('Enter new name:', video.name);
+                                          if (newName && newName.trim()) {
+                                            renameVideo(currentTune.id, idx, newName.trim());
+                                          }
+                                        }}
+                                        className="text-amber-600 hover:text-amber-700 text-sm font-semibold"
+                                      >
+                                        Rename
+                                      </button>
+                                      <button 
+                                        onClick={() => deleteVideo(currentTune.id, idx)}
+                                        className="text-red-600 hover:text-red-700 text-sm font-semibold"
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
+                                  </div>
+                                  {video.type === 'youtube' ? (
+                                    <div className="relative">
+                                      <div className="bg-black aspect-video rounded">
+                                        <iframe
+                                          src={`https://www.youtube.com/embed/${video.videoId}`}
+                                          className="w-full h-full rounded"
+                                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                          allowFullScreen
+                                        />
+                                      </div>
+                                      <p className="text-xs text-gray-500 mt-1">
+                                        If video won't play: <a href={`https://www.youtube.com/watch?v=${video.videoId}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Watch on YouTube</a>
+                                      </p>
+                                    </div>
+                                  ) : (
+                                    <video src={video.url} controls className="w-full rounded" />
+                                  )}
+                                </div>
+                              ))}
+                              
+                              {addingVideoToTune === currentTune.id && (
+                                <div className="mt-4 pt-4 border-t border-gray-200">
+                                  <p className="text-sm text-gray-600 mb-2">Add another video:</p>
+                                  <div className="space-y-2">
+                                    <label className="cursor-pointer block">
+                                      <span className="block bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-semibold text-sm text-center">📹 Upload Video</span>
+                                      <input 
+                                        type="file" 
+                                        accept="video/*" 
+                                        onChange={(e) => handleVideoUploadExisting(e, currentTune.id)} 
+                                        className="hidden" 
+                                      />
+                                    </label>
+                                    <div className="flex gap-2">
+                                      <input
+                                        type="text"
+                                        placeholder="Or paste YouTube URL..."
+                                        value={youtubeInputExisting}
+                                        onChange={(e) => setYoutubeInputExisting(e.target.value)}
+                                        className="flex-1 p-2 border border-gray-300 rounded-lg text-sm"
+                                      />
+                                      <button
+                                        onClick={() => addYouTubeLinkExisting(currentTune.id)}
+                                        disabled={!youtubeInputExisting}
+                                        className="bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white px-4 py-2 rounded-lg font-semibold text-sm"
+                                      >
+                                        Add
+                                      </button>
+                                    </div>
+                                    <button 
+                                      onClick={() => { setAddingVideoToTune(null); setYoutubeInputExisting(''); }}
+                                      className="w-full bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-lg font-semibold text-sm"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {!addingVideoToTune && (
+                                <button 
+                                  onClick={() => setAddingVideoToTune(currentTune.id)} 
+                                  className="w-full mt-3 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-semibold text-sm"
+                                >
+                                  ➕ Add Another Video
+                                </button>
+                              )}
+                              
+                              <button onClick={() => setShowVideos(false)} className="w-full mt-3 bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-lg font-semibold text-sm">Hide Videos</button>
+                            </div>
+                          ) : (
+                            <div className="text-center cursor-pointer" onClick={() => setShowVideos(true)}>
+                              <div className="text-6xl mb-2">🎥</div>
+                              <p className="text-purple-700">Click to view videos ({currentTune.videos.length})</p>
+                            </div>
+                          )
+                        ) : (
+                          <div className="bg-white rounded-lg p-6 text-center">
+                            <p className="text-gray-600 mb-4">No videos yet</p>
+                            {addingVideoToTune === currentTune.id ? (
+                              <div>
+                                <p className="text-sm text-gray-600 mb-2">Add a video:</p>
+                                <div className="space-y-2">
+                                  <label className="cursor-pointer block">
+                                    <span className="block bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">📹 Upload Video</span>
+                                    <input 
+                                      type="file" 
+                                      accept="video/*" 
+                                      onChange={(e) => handleVideoUploadExisting(e, currentTune.id)} 
+                                      className="hidden" 
+                                    />
+                                  </label>
+                                  <div className="flex gap-2">
+                                    <input
+                                      type="text"
+                                      placeholder="Or paste YouTube URL..."
+                                      value={youtubeInputExisting}
+                                      onChange={(e) => setYoutubeInputExisting(e.target.value)}
+                                      className="flex-1 p-2 border border-gray-300 rounded-lg text-sm"
+                                    />
+                                    <button
+                                      onClick={() => addYouTubeLinkExisting(currentTune.id)}
+                                      disabled={!youtubeInputExisting}
+                                      className="bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white px-4 py-2 rounded-lg font-semibold text-sm"
+                                    >
+                                      Add
+                                    </button>
+                                  </div>
+                                  <button 
+                                    onClick={() => { setAddingVideoToTune(null); setYoutubeInputExisting(''); }}
+                                    className="w-full bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-lg font-semibold text-sm"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button 
+                                onClick={() => setAddingVideoToTune(currentTune.id)} 
+                                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg font-semibold"
+                              >
+                                ➕ Add Video
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {showPDF && currentTune.pdf && (
+                      <div className="mb-6">
+                        <iframe src={currentTune.pdf} className="w-full h-[600px] border border-gray-300 rounded-lg" title="Sheet Music" />
+                      </div>
+                    )}
+
+                    <div className="mb-6">
+                      <div className="flex justify-between items-center mb-2">
+                        <p className="text-sm font-semibold text-gray-700">Sheet Music (PDF):</p>
+                        {currentTune.pdf && (
+                          <button 
+                            onClick={() => {
+                              setTunes(tunes.map(tune => tune.id === currentTune.id ? { ...tune, pdf: null } : tune));
+                              setShowPDF(false);
+                            }} 
+                            className="text-red-600 hover:text-red-700 text-sm font-semibold"
+                          >
+                            Delete PDF
+                          </button>
+                        )}
+                      </div>
+                      {currentTune.pdf ? (
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex justify-between items-center">
+                          <span className="text-blue-700 font-semibold">📄 PDF attached</span>
+                          <button onClick={() => setShowPDF(!showPDF)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">
+                            {showPDF ? 'Hide' : 'View'}
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="cursor-pointer block">
+                          <span className="block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm text-center">📄 Upload PDF</span>
+                          <input 
+                            type="file" 
+                            accept=".pdf" 
+                            onChange={(e) => {
+                              const file = e.target.files[0];
+                              if (file && file.type === 'application/pdf') {
+                                const reader = new FileReader();
+                                reader.onload = (event) => {
+                                  setTunes(tunes.map(tune => 
+                                    tune.id === currentTune.id ? { ...tune, pdf: event.target.result } : tune
+                                  ));
+                                };
+                                reader.readAsDataURL(file);
+                              } else {
+                                alert('Please upload a PDF file');
+                              }
+                              e.target.value = '';
+                            }} 
+                            className="hidden" 
+                          />
+                        </label>
+                      )}
+                    </div>
+
+                    <div className="mb-6">
+                      <div className="flex justify-between items-center mb-2">
+                        <p className="text-sm font-semibold text-gray-700">Notes:</p>
+                        <button onClick={() => {
+                          setEditingNotes(!editingNotes);
+                          setTempNotes(currentTune.notes || '');
+                        }} className="text-amber-600 hover:text-amber-700 text-sm font-semibold">
+                          {editingNotes ? 'Cancel' : 'Edit'}
+                        </button>
+                      </div>
+                      {editingNotes ? (
+                        <div>
+                          <textarea value={tempNotes} onChange={(e) => setTempNotes(e.target.value)} className="w-full p-3 border border-gray-300 rounded-lg mb-2" rows="3" />
+                          <button onClick={() => updateTuneNotes(currentTune.id, tempNotes)} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">Save Notes</button>
+                        </div>
+                      ) : (
+                        <p className="text-gray-600 text-sm whitespace-pre-wrap">{currentTune.notes || 'No notes yet'}</p>
+                      )}
+                    </div>
+
+                    <div className="mb-6">
+                      <button 
+                        onClick={() => markAsPracticed(currentTune.id)} 
+                        className="w-full bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center justify-center gap-2"
+                      >
+                        ✓ Mark as Practiced Today
+                      </button>
+                    </div>
+
+                    <div className="mb-6">
+                      <p className="text-sm text-gray-600 mb-2">Update progress:</p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        {categories.map(cat => (
+                          <button key={cat} onClick={() => updateCategory(currentTune.id, cat)} className={`px-4 py-2 rounded-lg font-semibold ${currentTune.category === cat ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>{cat}</button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center">
+                      <button onClick={() => { setCurrentIndex(Math.max(0, currentIndex - 1)); setShowAudio(false); setShowVideos(false); setShowPDF(false); }} disabled={currentIndex === 0} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed rounded-lg font-semibold text-gray-700">
+                        ← Previous
+                      </button>
+                      <span className="text-gray-600">{currentIndex + 1} / {displayedTunes.length}</span>
+                      <button onClick={() => { setCurrentIndex(Math.min(displayedTunes.length - 1, currentIndex + 1)); setShowAudio(false); setShowVideos(false); setShowPDF(false); }} disabled={currentIndex === displayedTunes.length - 1} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed rounded-lg font-semibold text-gray-700">
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {displayedTunes.length === 0 && (
+                  <div className="bg-white rounded-lg shadow-lg p-8 text-center">
+                    <p className="text-gray-600">{searchQuery ? `No tunes found matching "${searchQuery}"` : 'No tunes in this category yet.'}</p>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    ReactDOM.render(<FiddleFlashcards />, document.getElementById('root'));
+  </script>
+</body>
+</html>
